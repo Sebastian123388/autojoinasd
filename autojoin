@@ -56,7 +56,7 @@
 
         local upConnections = getconnections(button.MouseButton1Up)
         task.defer(function()
-            task.wait(0.0183)
+            task.wait(0.0178)
             for _, conn in ipairs(upConnections) do
                 conn:Fire()
             end
@@ -115,4 +115,4 @@
         end
     end
     connect()
-end)()
+end)()  
