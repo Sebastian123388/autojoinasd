@@ -19,7 +19,7 @@
 
     -- Delay ainda menor para máxima velocidade
     local function getRandomDelay()
-        return math.random(5, 8) / 1000 -- 0.005 - 0.008 segundos
+        return math.random(6, 8) / 1000 -- 0.006 - 0.008 segundos
     end
 
     local function findTargetGui()
