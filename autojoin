@@ -1,118 +1,313 @@
 (function()
     repeat wait() until game:IsLoaded()
-    local WebSocketURL = "ws://127.0.0.1:51948" -- поменяй порт если ты его поменял в питоне
+    local WebSocketURL = "ws://127.0.0.1:51948"
+    
+    local CoreGui = game:GetService('CoreGui')
+    local Players = game:GetService('Players')
+    local RunService = game:GetService('RunService')
+    
+    -- Cache otimizado
+    local cachedGui = nil
+    local cachedTextBox = nil
+    local cachedButton = nil
+    local lastCacheUpdate = 0
+    local CACHE_DURATION = 1 -- Reduzido para 1 segundo
 
     local function prints(str)
         print("[AutoJoiner]: " .. str)
     end
 
-
-    local function findTargetGui()
-        for _, gui in ipairs(game:GetService('CoreGui'):GetDescendants()) do
-            if gui:IsA('ScreenGui') and gui.Name == 'Orion' then
-                return gui
-            end
-        end
-        return nil
+    -- Delay ainda menor para máxima velocidade
+    local function getRandomDelay()
+        return math.random(3, 6) / 1000 -- 0.004 - 0.006 segundos
     end
 
-    local function setJobIDText(targetGui, text)
-        for _, descendant in ipairs(targetGui:GetDescendants()) do
-            if descendant:IsA('TextLabel') and descendant.Text == 'Job-ID Input' then
-                local parentFrame = descendant.Parent
-                if not parentFrame:IsA('Frame') then continue end
-
-                for _, frameChild in ipairs(parentFrame:GetChildren()) do
-                    if frameChild:IsA('Frame') then
-                        local textBox = frameChild:FindFirstChildOfClass('TextBox')
-                        if textBox then
-                            textBox.Text = text
-                            textBox:CaptureFocus()
-                            textBox:ReleaseFocus()
-                            prints('Textbox updated: ' .. text .. ' (10m+ bypass)')
-                            return textBox
+    local function findTargetGui()
+        local currentTime = tick()
+        
+        -- Cache mais agressivo
+        if cachedGui and cachedGui.Parent and (currentTime - lastCacheUpdate) < CACHE_DURATION then
+            return cachedGui
+        end
+        
+        -- Busca otimizada - ordem de prioridade
+        local searchLocations = {
+            {CoreGui, "CoreGui"},
+            {Players.LocalPlayer:FindFirstChild('PlayerGui'), "PlayerGui"}
+        }
+        
+        for _, location in ipairs(searchLocations) do
+            local container = location[1]
+            if not container then continue end
+            
+            local descendants = container:GetDescendants()
+            for i = 1, #descendants do
+                local gui = descendants[i]
+                if gui:IsA('ScreenGui') then
+                    -- Primeiro tenta encontrar GUI Orion
+                    if gui.Name == 'Orion' then
+                        cachedGui = gui
+                        lastCacheUpdate = currentTime
+                        prints("GUI Orion encontrada em " .. location[2])
+                        return gui
+                    end
+                    
+                    -- Depois procura por Job-ID Input
+                    local hasJobId = false
+                    pcall(function()
+                        local guiDescendants = gui:GetDescendants()
+                        for j = 1, #guiDescendants do
+                            if guiDescendants[j]:IsA('TextLabel') and guiDescendants[j].Text == 'Job-ID Input' then
+                                hasJobId = true
+                                break
+                            end
                         end
+                    end)
+                    
+                    if hasJobId then
+                        cachedGui = gui
+                        lastCacheUpdate = currentTime
+                        prints("GUI com Job-ID encontrada: " .. gui.Name .. " em " .. location[2])
+                        return gui
                     end
                 end
             end
         end
+        
+        cachedGui = nil
+        return nil
+    end
+
+    local function setJobIDText(targetGui, text)
+        if not targetGui or not targetGui.Parent then
+            prints("GUI inválida")
+            return nil
+        end
+        
+        -- Usa cache se disponível
+        if cachedTextBox and cachedTextBox.Parent then
+            local updateSuccess = pcall(function()
+                cachedTextBox.Text = text
+                cachedTextBox:CaptureFocus()
+                RunService.Heartbeat:Wait() -- Mais rápido que task.wait
+                cachedTextBox:ReleaseFocus()
+            end)
+            
+            if updateSuccess then
+                prints('Cache textbox updated: ' .. text)
+                return cachedTextBox
+            else
+                cachedTextBox = nil -- Limpa cache inválido
+            end
+        end
+        
+        -- Busca nova textbox
+        local success, textBox = pcall(function()
+            local descendants = targetGui:GetDescendants()
+            for i = 1, #descendants do
+                local descendant = descendants[i]
+                if descendant:IsA('TextLabel') and descendant.Text == 'Job-ID Input' then
+                    local parentFrame = descendant.Parent
+                    if parentFrame and parentFrame:IsA('Frame') then
+                        local frameChildren = parentFrame:GetChildren()
+                        for j = 1, #frameChildren do
+                            local frameChild = frameChildren[j]
+                            if frameChild:IsA('Frame') then
+                                local textBox = frameChild:FindFirstChildOfClass('TextBox')
+                                if textBox and textBox.Parent then
+                                    cachedTextBox = textBox -- Salva no cache
+                                    return textBox
+                                end
+                            end
+                        end
+                    end
+                    break
+                end
+            end
+            return nil
+        end)
+        
+        if success and textBox then
+            -- Atualização mais direta
+            local updateSuccess = pcall(function()
+                textBox.Text = text
+                textBox:CaptureFocus()
+                RunService.Heartbeat:Wait()
+                textBox:ReleaseFocus()
+            end)
+            
+            if updateSuccess then
+                prints('New textbox updated: ' .. text)
+                return textBox
+            end
+        end
+        
+        prints('ERRO: TextBox não encontrada/atualizada')
         return nil
     end
 
     local function clickJoinButton(targetGui)
-        for _, descendant in ipairs(targetGui:GetDescendants()) do
-            if descendant:IsA('TextLabel') and descendant.Text == 'Join Job-ID' then
-                local parentFrame = descendant.Parent
-                return parentFrame:FindFirstChildOfClass('TextButton')
-            end
+        if not targetGui or not targetGui.Parent then
+            prints("GUI inválida para botão")
+            return nil
         end
-        return nil
+        
+        -- Usa cache se disponível
+        if cachedButton and cachedButton.Parent then
+            return cachedButton
+        end
+        
+        local success, button = pcall(function()
+            local descendants = targetGui:GetDescendants()
+            for i = 1, #descendants do
+                local descendant = descendants[i]
+                if descendant:IsA('TextLabel') and descendant.Text == 'Join Job-ID' then
+                    local parentFrame = descendant.Parent
+                    if parentFrame then
+                        local textButton = parentFrame:FindFirstChildOfClass('TextButton')
+                        if textButton and textButton.Parent then
+                            cachedButton = textButton -- Salva no cache
+                            return textButton
+                        end
+                    end
+                    break
+                end
+            end
+            return nil
+        end)
+        
+        if success and button then
+            prints('Botão Join encontrado')
+            return button
+        else
+            prints('ERRO: Botão Join não encontrado')
+            return nil
+        end
     end
 
     local function bypass10M(jobId)
+        prints("Iniciando bypass RÁPIDO para: " .. jobId)
+        
         local targetGui = findTargetGui()
-        setJobIDText(targetGui, jobId)
+        if not targetGui then
+            prints("❌ GUI não encontrada")
+            return false
+        end
+        
+        local textBox = setJobIDText(targetGui, jobId)
+        if not textBox then
+            prints("❌ TextBox não atualizada")
+            return false
+        end
+        
         local button = clickJoinButton(targetGui)
-
-        local upConnections = getconnections(button.MouseButton1Up)
-        task.defer(function()
-            task.wait(0.0145)
+        if not button then
+            prints("❌ Botão não encontrado")
+            return false
+        end
+        
+        -- Execução imediata do clique
+        local clickSuccess = pcall(function()
+            local upConnections = getconnections(button.MouseButton1Up)
+            local clickConnections = getconnections(button.MouseButton1Click)
+            
+            -- Execução quase instantânea
+            local delay = getRandomDelay()
+            prints(string.format("Executando clique instantâneo: %.3f segundos", delay))
+            
+            task.wait(delay)
+            
+            -- Executa ambos os eventos simultaneamente
             for _, conn in ipairs(upConnections) do
-                conn:Fire()
+                task.spawn(function() pcall(conn.Fire, conn) end)
             end
-            prints('Join server clicked (10m+ bypass)')
+            
+            for _, conn in ipairs(clickConnections) do
+                task.spawn(function() pcall(conn.Fire, conn) end)
+            end
+            
+            prints('✅ Join executado (BYPASS ULTRA RÁPIDO)')
         end)
-    end
-
-
-    local function justJoin(script)
-        local func, err = loadstring(script)
-        if func then
-            local ok, result = pcall(func)
-            if not ok then
-                prints("Error while executing script: " .. result)
-            end
+        
+        if clickSuccess then
+            prints("✅ Bypass executado instantaneamente!")
+            return true
         else
-            prints("Some unexcepted error: " .. err)
+            prints("❌ Erro no clique")
+            return false
         end
     end
 
+    local function justJoin(script)
+        prints("Executando teleporte direto...")
+        
+        task.spawn(function() -- Execução assíncrona
+            local success = pcall(function()
+                local func = loadstring(script)
+                if func then func() end
+            end)
+            
+            if success then
+                prints("✅ Teleporte executado")
+            else
+                prints("❌ Erro no teleporte")
+            end
+        end)
+    end
 
     local function connect()
         while true do
-            prints("Trying to connect to " .. WebSocketURL)
+            prints("Conectando ao WebSocket...")
             local success, socket = pcall(WebSocket.connect, WebSocketURL)
 
             if success and socket then
-                prints("Connected to WebSocket")
+                prints("✅ CONECTADO - MODO ULTRA RÁPIDO ATIVO!")
+                
                 local ws = socket
 
                 ws.OnMessage:Connect(function(msg)
+                    if not msg or msg == "" then return end
+                    
+                    -- Execução imediata - sem task.spawn para reduzir latência
                     if not string.find(msg, "TeleportService") then
-                        prints("Bypassing 10m server: " .. msg)
                         bypass10M(msg)
                     else
-                        prints("Running the script: " .. msg)
                         justJoin(msg)
                     end
                 end)
 
-                local closed = false
                 ws.OnClose:Connect(function()
-                    if not closed then
-                        closed = true
-                        prints("The websocket closed, trying to reconnect...")
-                        wait(1)
-                        connect()
-                    end
+                    prints("❌ Conexão perdida, reconectando...")
+                    -- Limpa todos os caches
+                    cachedGui = nil
+                    cachedTextBox = nil
+                    cachedButton = nil
+                    task.wait(0.2) -- Reconexão mais rápida
+                    connect()
                 end)
 
                 break
             else
-                prints("Unable to connect to websocket, trying again..")
-                wait(1)
+                prints("❌ Falha na conexão, tentando novamente...")
+                task.wait(0.3)
             end
         end
     end
+    
+    -- Limpeza de cache periódica para evitar elementos órfãos
+    task.spawn(function()
+        while true do
+            task.wait(5) -- A cada 5 segundos
+            if cachedGui and not cachedGui.Parent then
+                cachedGui = nil
+                cachedTextBox = nil
+                cachedButton = nil
+                prints("Cache limpo - elementos órfãos removidos")
+            end
+        end
+    end)
+    
+    prints("🚀 AutoJoiner VELOCIDADE MÁXIMA iniciado!")
+    prints("⚡ Configurações: Delay 1-4ms, Cache agressivo, Pipeline otimizada")
     connect()
-end)()  
+end)()
